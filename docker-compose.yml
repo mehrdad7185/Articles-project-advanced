@@ -1,0 +1,53 @@
+
+version: '3.8'
+
+services:
+  # declaring iot device
+  iot-device:
+    build:
+      context: .
+      dockerfile: Dockerfile.iot
+    container_name: iot-device-1
+    networks:
+      - fog-net
+
+  # stronger node no 1
+  fog-node-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.fog
+    container_name: fog-node-1
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '512M'
+    networks:
+      - fog-net
+
+  #  weaker node no 2
+  fog-node-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.fog
+    container_name: fog-node-2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: '256M'
+    networks:
+      - fog-net
+  
+  # cloud
+  cloud-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloud 
+    container_name: cloud-server
+    networks:
+      - fog-net
+
+networks:
+  fog-net:
+    driver: bridge
