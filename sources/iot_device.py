@@ -24,33 +24,32 @@ def get_target_fog_node():
         return None
 
 while True:
-    # 1. Ask the scheduler for a fog node
     target_host = get_target_fog_node()
-    
     if not target_host:
-        print(f"[{DEVICE_ID}] Could not get a fog node from scheduler. Retrying in 5s.")
+        print(f"[{DEVICE_ID}] Could not get a fog node. Retrying in 5s.")
         time.sleep(5)
         continue
 
     print(f"[{DEVICE_ID}] Scheduler assigned: '{target_host}'. Sending data...")
     
-    # 2. Send data to the assigned fog node
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((target_host, FOG_PORT))
             
+            # Record the start time before sending 
+            start_time = time.time()
+
             payload = {
                 "device_id": DEVICE_ID,
                 "temperature": round(random.uniform(20.0, 30.0), 2),
-                "timestamp": time.time()
+                "timestamp": start_time # Use the recorded start_time
             }
             
             message = json.dumps(payload).encode('utf-8')
             s.sendall(message)
-            
             print(f"[{DEVICE_ID}] Successfully sent data to {target_host}")
 
     except Exception as e:
-        print(f"[{DEVICE_ID}] An error occurred while sending data to {target_host}: {e}")
+        print(f"[{DEVICE_ID}] An error occurred sending data to {target_host}: {e}")
     
     time.sleep(5)

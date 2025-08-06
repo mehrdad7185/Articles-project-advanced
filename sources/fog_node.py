@@ -2,7 +2,7 @@
 import socket
 import json
 import os
-
+import time
 # --- Configuration ---
 # Listen on all available network interfaces
 HOST = '0.0.0.0'  
@@ -25,18 +25,26 @@ server_socket.listen()
 print(f"[{NODE_ID}] Fog node is running and listening on {HOST}:{PORT}")
 
 while True:
-    # Wait for a connection
+                    # Wait for a connection
     conn, addr = server_socket.accept()
     with conn:
+        # Record the end time as soon as a message is received ---
+        end_time = time.time()
+          # Receive the data from the client
         print(f"[{NODE_ID}] Connected by {addr}")
-        
-        # Receive the data from the client
         data = conn.recv(1024) # 1024 is the buffer size
         
         if data:
-            try:
-                # Decode the bytes to a string and parse the JSON
+            try:          # Decode the bytes to a string and parse the JSON
                 message = json.loads(data.decode('utf-8'))
                 print(f"[{NODE_ID}] Received data: {message}")
+
+                # Calculate and print the latency
+                start_time = message.get("timestamp", 0)
+                if start_time > 0:
+                    latency = (end_time - start_time) * 1000 # in milliseconds
+                    print(f"[{NODE_ID}] >> Calculated E2E Latency: {latency:.2f} ms")
+
             except json.JSONDecodeError:
                 print(f"[{NODE_ID}] Received non-JSON data: {data.decode('utf-8')}")
+
