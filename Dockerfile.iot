@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY sources/iot_device.py .
 
 # Run the python script when the container starts
-CMD ["python", "-u", "iot_device.py"]g
+CMD ["python", "-u", "iot_device.py"]
