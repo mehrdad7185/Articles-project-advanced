@@ -2,6 +2,17 @@
 version: '3.8'
 
 services:
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: scheduler
+    ports:
+      - "5000:5000" # Expose port 5000 to the host for easy testing
+    networks:
+      - fog-net
+
   # declaring iot device
   iot-device:
     build:
@@ -10,6 +21,8 @@ services:
     container_name: iot-device-1
     networks:
       - fog-net
+    depends_on: # Make sure scheduler is ready before iot-device starts
+      - scheduler  
 
   # stronger node no 1
   fog-node-1:
