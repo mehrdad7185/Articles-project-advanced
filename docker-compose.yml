@@ -12,6 +12,9 @@ services:
       - "5000:5000" # Expose port 5000 to the host for easy testing
     networks:
       - fog-net
+    user: "1000:983"    
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  
 
   # declaring iot device
   iot-device:
@@ -22,7 +25,7 @@ services:
     networks:
       - fog-net
     depends_on: # Make sure scheduler is ready before iot-device starts
-      - scheduler  
+      - scheduler
 
   # stronger node no 1
   fog-node-1:
