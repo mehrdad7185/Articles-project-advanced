@@ -1,4 +1,5 @@
 
+
 from flask import Flask, jsonify, request
 import time
 import docker
@@ -7,13 +8,10 @@ app = Flask(__name__)
 
 # --- Configuration ---
 FOG_NODES = ['fog-node-1', 'fog-node-2']
-# Time in seconds before we try a 'SUSPECTED' node again
-RECOVERY_TIME_SECONDS = 10
-# The placement strategy. For the paper, you can test 'LEAST_CPU' or 'LEAST_RAM'
-PLACEMENT_STRATEGY = 'LEAST_CPU' 
+RECOVERY_TIME_SECONDS = 30
+PLACEMENT_STRATEGY = 'LEAST_CPU'
 
 # --- State Management ---
-# A single, comprehensive dictionary to track node status
 node_status = {
     node: {"status": "UP", "last_failure": 0, "cpu": 0.0, "memory": 0.0}
     for node in FOG_NODES
@@ -22,24 +20,29 @@ node_status = {
 # --- Docker Client Initialization ---
 try:
     client = docker.from_env()
-    client.ping() # Check connection
+    client.ping()
     DOCKER_AVAILABLE = True
     print("[INFO] Successfully connected to Docker daemon.")
 except Exception as e:
     DOCKER_AVAILABLE = False
     print(f"[CRITICAL_ERROR] Could not connect to Docker daemon: {e}")
-    print("[INFO] Docker not available. Health checks will be limited to failure reporting only.")
 
-
-def update_node_stats():
-   
+def update_all_node_statuses():
+    """
+    The core logic for updating the status of all nodes.
+    It tries to get stats for each node. Success means it's UP, failure means it's DOWN.
+    """
     if not DOCKER_AVAILABLE:
         return
 
     for node_name in FOG_NODES:
-        # We only need to get stats for nodes that are considered UP
-        if node_status[node_name]["status"] == "UP":
-            try:
+        try:
+            # Check if the node was previously suspected and its recovery time is over
+            is_in_recovery = (node_status[node_name]["status"] == "SUSPECTED" and
+                              time.time() - node_status[node_name]["last_failure"] > RECOVERY_TIME_SECONDS)
+
+            # We only try to get stats for nodes that are UP or in recovery
+            if node_status[node_name]["status"] == "UP" or is_in_recovery:
                 container = client.containers.get(node_name)
                 stats = container.stats(stream=False)
                 
@@ -52,66 +55,53 @@ def update_node_stats():
                 
                 # --- Memory Calculation ---
                 memory_usage = stats["memory_stats"]["usage"] / (1024 * 1024) # in MB
-
-                node_status[node_name].update({"cpu": round(cpu_percent, 2), "memory": round(memory_usage, 2)})
-
-            except docker.errors.NotFound:
-                # If a container is not found, it has failed. Report it.
-                print(f"[HEALTH CHECK] Node '{node_name}' not found during stat update. Marking as SUSPECTED.")
-                _mark_node_as_suspected(node_name)
-            except Exception as e:
-                print(f"[ERROR] Could not get stats for {node_name}: {e}")
-                _mark_node_as_suspected(node_name)
+                
+                # If we successfully get stats, the node is definitely UP
+                if node_status[node_name]["status"] != "UP":
+                    print(f"[HEALTH CHECK] Node '{node_name}' has recovered and is now UP.")
+                
+                node_status[node_name].update({
+                    "status": "UP", "cpu": round(cpu_percent, 2), "memory": round(memory_usage, 2)
+                })
+        
+        except docker.errors.NotFound:
+            # If container is not found, it is definitely down.
+            _mark_node_as_suspected(node_name)
+        except Exception as e:
+            # Also mark as down on other unexpected errors
+            print(f"[ERROR] Could not get stats for {node_name}: {e}")
+            _mark_node_as_suspected(node_name)
 
 @app.route('/get_fog_node', methods=['GET'])
 def get_fog_node():
-    """
-    The main placement endpoint. It combines health checks and resource-based placement.
-    """
-    # 1. Check if any suspected nodes are ready for recovery
-    for node, info in node_status.items():
-        if info["status"] == "SUSPECTED" and time.time() - info["last_failure"] > RECOVERY_TIME_SECONDS:
-            info["status"] = "UP"
-            print(f"[HEALTH CHECK] Node '{node}' recovery period is over. Marking as UP.")
-
-    # 2. Get the latest resource stats from Docker
-    update_node_stats()
-
-    # 3. Filter for nodes that are currently marked as "UP"
+    """ The main placement endpoint. """
+    # 1. Update the status of all nodes based on their current state
+    update_all_node_statuses()
+    
+    # 2. Filter for nodes that are currently marked as "UP"
     active_nodes = {node: info for node, info in node_status.items() if info["status"] == "UP"}
 
     if not active_nodes:
         return jsonify({"error": "No active fog nodes available"}), 503
 
-    # 4. Choose placement based on the selected strategy
-    if PLACEMENT_STRATEGY == 'LEAST_CPU':
-        chosen_node = min(active_nodes, key=lambda node: active_nodes[node]['cpu'])
-    elif PLACEMENT_STRATEGY == 'LEAST_RAM':
-        chosen_node = min(active_nodes, key=lambda node: active_nodes[node]['memory'])
-    else: # Fallback to a simple round-robin style if strategy is unknown
-        chosen_node = min(active_nodes.items(), key=lambda item: item[1].get('connections', 0))[0]
-
-    status_str = ", ".join([
-        f"'{n}': {{'cpu': {s['cpu']}%, 'mem': {s['memory']}MB, 'status': '{s['status']}'}}"
-        for n, s in node_status.items()
-    ])
-    print(f"Status: {{{status_str}}}. Strategy: {PLACEMENT_STRATEGY}. Chosen: '{chosen_node}'")
+    # 3. Choose placement based on the selected strategy
+    chosen_node = min(active_nodes, key=lambda node: active_nodes[node]['cpu'])
     
+    print(f"Status: {node_status}. Chosen: '{chosen_node}'")
     return jsonify({"fog_node_host": chosen_node})
 
 def _mark_node_as_suspected(node_name):
-    """A helper function to mark a node as suspected."""
+    """ Helper function to mark a node as suspected if it's not already. """
     if node_name in node_status and node_status[node_name]['status'] == 'UP':
         node_status[node_name]['status'] = 'SUSPECTED'
         node_status[node_name]['last_failure'] = time.time()
+        print(f"[HEALTH CHECK] Node '{node_name}' is now SUSPECTED.")
 
 @app.route('/report_failure', methods=['POST'])
 def report_failure():
-    """Endpoint for devices to report a connection failure."""
-    data = request.get_json()
-    failed_node = data.get('node')
+    """ Endpoint for devices to report a connection failure. """
+    failed_node = request.get_json().get('node')
     if failed_node:
-        print(f"[HEALTH CHECK] Received failure report for node '{failed_node}'.")
         _mark_node_as_suspected(failed_node)
     return jsonify({"status": "acknowledged"}), 200
 
