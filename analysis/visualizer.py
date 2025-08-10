@@ -1,13 +1,15 @@
+# analysis/visualizer.py (Final Polished Version with new plots and annotations)
+# Comments are in English
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates # Import for date formatting
+import matplotlib.dates as mdates
 import seaborn as sns
 
 def create_visualizations(csv_path):
     """
-    Reads the parsed data and creates final, publication-quality plots.
-    This version includes improved text annotation placement and x-axis formatting.
+    Reads the final, clean data and creates publication-quality plots.
+    This version creates time-series plots for CPU and Memory with clean annotations.
     """
     try:
         data = pd.read_csv(csv_path, parse_dates=['timestamp'])
@@ -15,69 +17,64 @@ def create_visualizations(csv_path):
         print(f"Error reading '{csv_path}'. Please run the parser.py script first.")
         return
 
-    sns.set_theme(style="whitegrid", palette="viridis")
+    sns.set_theme(style="darkgrid", palette="colorblind")
 
     # --- Data Extraction ---
     latency_data = data[data['metric'] == 'latency']
-    cpu_data = data[data['metric'] == 'cpu']
     failure_scenario_data = data[data['scenario'] == 'Resource-Aware (Failure)']
+    cpu_data = failure_scenario_data[failure_scenario_data['metric'] == 'cpu']
     mem_data = failure_scenario_data[failure_scenario_data['metric'] == 'memory']
     event_data = failure_scenario_data[failure_scenario_data['metric'] == 'event']
 
-    # --- Plot 1 & 2 (Latency and CPU) remain the same ---
+    # --- Plot 1: Latency Distribution ---
     if not latency_data.empty:
-        plt.figure(figsize=(10, 7))
-        sns.boxplot(x='scenario', y='value', data=latency_data)
-        plt.title('Distribution of End-to-End Latency per Scenario', fontsize=16)
-        plt.ylabel('Latency (ms)'); plt.xlabel('Experiment Scenario')
+        fig, ax = plt.subplots(figsize=(10, 7))
+        sns.boxplot(x='scenario', y='value', data=latency_data, ax=ax)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=10, integer=True))
+        ax.set_title('Latency Distribution per Scenario', fontsize=16)
+        ax.set_ylabel('Latency (ms)'); ax.set_xlabel('Scenario')
         plt.savefig('plot_latency_distribution.png', dpi=300, bbox_inches='tight')
-        print("Saved plot: plot_latency_distribution.png")
+        print("Saved: plot_latency_distribution.png")
 
+    # --- Plot 2: CPU Usage Time-Series with Rolling Average ---
     if not cpu_data.empty:
-        # ... (CPU plot code is unchanged) ...
-        plt.savefig('plot_cpu_usage.png', dpi=300, bbox_inches='tight')
-        print("Saved plot: plot_cpu_usage.png")
+        fig, ax = plt.subplots(figsize=(20, 8))
+        cpu_data['cpu_smooth'] = cpu_data.groupby('node')['value'].transform(lambda s: s.rolling(5, min_periods=1).mean())
+        sns.lineplot(x='timestamp', y='cpu_smooth', data=cpu_data, hue='node', style='node', ax=ax, linewidth=2.5)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=8))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
+        ax.set_title('Smoothed CPU Usage During Failure & Recovery Scenario', fontsize=18)
+        ax.set_ylabel('CPU Usage (%) (Rolling Average)'); ax.set_xlabel('Time (Minute:Second)')
+        ax.legend(title='Fog Node')
+        plt.savefig('plot_cpu_timeseries.png', dpi=300, bbox_inches='tight')
+        print("Saved: plot_cpu_timeseries.png")
 
-    # --- Plot 3: Memory Usage with Final Polished Annotations ---
+    # --- Plot 3: Memory Usage with Clean Annotations ---
     if not mem_data.empty:
-        fig, ax = plt.subplots(figsize=(20, 8)) # Make the figure even wider
+        fig, ax = plt.subplots(figsize=(20, 8))
         sns.lineplot(x='timestamp', y='value', data=mem_data, hue='node', style='node', markers=True, ax=ax, linewidth=2)
 
+        # Add extra space at the bottom for the text annotations
         y_min, y_max = ax.get_ylim()
-        if y_max <= y_min: y_max = y_min + 1
+        ax.set_ylim(bottom=y_min - (y_max-y_min)*0.3, top=y_max + (y_max-y_min)*0.1)
         
-        # --- IMPROVEMENT: Increased vertical separation for text ---
-        text_y_positions = [
-            y_min,                      # Position 1: At the very bottom
-            y_max - (y_max - y_min) * 0.1 # Position 2: At the very top
-        ]
-        pos_idx = 0
-
-        for _, event in event_data.iterrows():
-            color = 'red' if event['value'] == 'DOWN' else 'green'
-            ax.axvline(x=event['timestamp'], color=color, linestyle='--', linewidth=1.5, alpha=0.9)
-            
-            # Alternate the y-position of the text
-            current_y_pos = text_y_positions[pos_idx % 2]
-            vertical_alignment = 'bottom' if (pos_idx % 2 == 0) else 'top'
-            pos_idx += 1
-            
-            ax.text(event['timestamp'], current_y_pos, f" {event['node']} {event['value']} ", 
-                    rotation=90, color=color, verticalalignment=vertical_alignment, fontsize=9,
-                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.7))
+        if not event_data.empty:
+            for _, event in event_data.iterrows():
+                color = 'red' if event['value'] == 'DOWN' else 'green'
+                # Use annotate for advanced text placement with arrows
+                ax.annotate(f"{event['node']} {event['value']}",
+                            xy=(event['timestamp'], ax.get_ylim()[0] + (y_max-y_min)*0.1), # Arrow points here
+                            xytext=(event['timestamp'], ax.get_ylim()[0]), # Text is here
+                            arrowprops=dict(facecolor=color, shrink=0.05, width=1.5, headwidth=5),
+                            ha='center', va='bottom', fontsize=10, color=color,
+                            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.8))
         
-        # --- IMPROVEMENT: Better x-axis date formatting ---
-        # Display time in Minute:Second format
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
-        # Set ticks at reasonable intervals (e.g., every 30 seconds)
-        ax.xaxis.set_major_locator(plt.MaxNLocator(20)) 
-        plt.xticks(rotation=45) # Rotate for better readability
-
         ax.set_title('Memory Usage During Failure & Recovery Scenario', fontsize=18)
-        ax.set_ylabel('Memory Usage (MB)', fontsize=14); ax.set_xlabel('Time (Minute:Second)', fontsize=14)
-        ax.legend(title='Fog Node', fontsize=12)
-        plt.savefig('plot_memory_with_events_final.png', dpi=300, bbox_inches='tight')
-        print("Saved final plot: plot_memory_with_events_final.png")
+        ax.set_ylabel('Memory Usage (MB)'); ax.set_xlabel('Time (Minute:Second)')
+        ax.legend(title='Fog Node')
+        plt.savefig('plot_memory_final.png', dpi=300, bbox_inches='tight')
+        print("Saved: plot_memory_final.png")
 
     plt.show()
 
