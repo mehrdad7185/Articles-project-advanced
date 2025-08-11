@@ -1,21 +1,25 @@
-
+# sources/iot_device.py (Improved Logging Version)
+# Comments are in English
 
 import socket
 import time
 import json
 import random
 import requests
+import os # Import the 'os' module
 
 # --- Configuration ---
 SCHEDULER_URL = "http://scheduler:5000"
 FOG_PORT = 9999
-DEVICE_ID = "iot-device-1"
+# --- NEW: Get a unique ID from the container's hostname ---
+# This makes logs much easier to read when using replicas.
+DEVICE_ID = os.environ.get('HOSTNAME', 'iot-device-unknown')
 
 def get_target_fog_node():
     """Gets the target fog node from the scheduler."""
     try:
         response = requests.get(f"{SCHEDULER_URL}/get_fog_node")
-        response.raise_for_status()  # Raise an exception for bad status codes
+        response.raise_for_status()
         data = response.json()
         return data.get("fog_node_host")
     except requests.exceptions.RequestException as e:
@@ -25,7 +29,6 @@ def get_target_fog_node():
 def report_failure_to_scheduler(failed_node):
     """Reports a connection failure to the scheduler."""
     try:
-        # Send a POST request to the new endpoint
         requests.post(f"{SCHEDULER_URL}/report_failure", json={"node": failed_node})
         print(f"[{DEVICE_ID}] Successfully reported failure of node '{failed_node}' to scheduler.")
     except requests.exceptions.RequestException as e:
@@ -44,7 +47,6 @@ while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((target_host, FOG_PORT))
             
-            # Record the start time before sending 
             start_time = time.time()
             payload = {
                 "device_id": DEVICE_ID,
@@ -56,7 +58,6 @@ while True:
 
     except Exception as e:
         print(f"[{DEVICE_ID}] FAILED to connect to {target_host}: {e}")
-        # Report the failure when a connection error occurs
         report_failure_to_scheduler(target_host)
     
-    time.sleep(5)    
+    time.sleep(random.uniform(3, 6)) # Added some randomness to requests
