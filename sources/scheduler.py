@@ -1,9 +1,10 @@
-# src/scheduler.py (Final, Synchronized Version)
+# sources/scheduler.py (Final & Polished Version)
 # Comments are in English
 
 from flask import Flask, jsonify, request
 import time
 import docker
+import threading
 
 app = Flask(__name__)
 
@@ -12,6 +13,7 @@ FOG_NODES = ['fog-node-1', 'fog-node-2']
 RECOVERY_TIME_SECONDS = 30
 
 # --- State Management ---
+status_lock = threading.Lock()
 node_status = {
     node: {"status": "UP", "last_failure": 0, "cpu": 0.0, "memory": 0.0}
     for node in FOG_NODES
@@ -20,79 +22,77 @@ node_status = {
 # --- Docker Client Initialization ---
 try:
     client = docker.from_env()
-    client.ping()
     DOCKER_AVAILABLE = True
     print("[INFO] Successfully connected to Docker daemon.")
 except Exception as e:
     DOCKER_AVAILABLE = False
     print(f"[CRITICAL_ERROR] Could not connect to Docker daemon: {e}")
 
+def mark_node_down(node_name, reason):
+    """A centralized function to mark a node as down and reset its metrics."""
+    with status_lock:
+        if node_name in node_status and node_status[node_name]['status'] == 'UP':
+            print(f"[HEALTH CHECK] Node '{node_name}' FAILED ({reason}) and is now SUSPECTED.")
+            node_status[node_name]['status'] = 'SUSPECTED'
+            node_status[node_name]['last_failure'] = time.time()
+            # --- KEY FIX: Reset CPU and Memory to zero upon failure ---
+            node_status[node_name]['cpu'] = 0.0
+            node_status[node_name]['memory'] = 0.0
+
 def update_all_node_statuses():
-    """Updates the status and resource usage of all nodes."""
     if not DOCKER_AVAILABLE: return
 
     for node_name in FOG_NODES:
         try:
-            is_in_recovery = (node_status[node_name]["status"] == "SUSPECTED" and
-                              time.time() - node_status[node_name]["last_failure"] > RECOVERY_TIME_SECONDS)
+            container = client.containers.get(node_name)
+            container.reload()
 
-            if node_status[node_name]["status"] == "UP" or is_in_recovery:
-                container = client.containers.get(node_name)
+            if container.status == 'running':
+                with status_lock:
+                    if node_status[node_name]["status"] == "SUSPECTED":
+                        print(f"[HEALTH CHECK] Node '{node_name}' has RECOVERED and is now UP.")
+                        node_status[node_name]["status"] = "UP"
+                
                 stats = container.stats(stream=False)
-                
-                # --- Robust CPU Calculation ---
+                # ... CPU and Memory calculation logic ...
                 cpu_percent = 0.0
-                cpu_stats = stats.get("cpu_stats", {})
                 precpu_stats = stats.get("precpu_stats", {})
-                cpu_usage = cpu_stats.get("cpu_usage", {})
-                precpu_usage = precpu_stats.get("cpu_usage", {})
-                cpu_delta = cpu_usage.get("total_usage", 0) - precpu_usage.get("total_usage", 0)
-                system_cpu_delta = cpu_stats.get("system_cpu_usage", 0) - precpu_stats.get("system_cpu_usage", 0)
-                online_cpus = cpu_stats.get("online_cpus", 1)
-
-                if system_cpu_delta > 0 and cpu_delta > 0:
-                    cpu_percent = (cpu_delta / system_cpu_delta) * online_cpus * 100.0
-                
-                # --- Memory Calculation ---
+                cpu_stats = stats.get("cpu_stats", {})
+                if precpu_stats and 'cpu_usage' in precpu_stats and 'system_cpu_usage' in precpu_stats:
+                    cpu_delta = cpu_stats["cpu_usage"]["total_usage"] - precpu_stats["cpu_usage"]["total_usage"]
+                    system_cpu_delta = cpu_stats["system_cpu_usage"] - precpu_stats["system_cpu_usage"]
+                    online_cpus = cpu_stats.get("online_cpus", len(precpu_stats["cpu_usage"].get("percpu_usage", [0])))
+                    if system_cpu_delta > 0.0 and cpu_delta > 0.0:
+                        cpu_percent = (cpu_delta / system_cpu_delta) * online_cpus * 100.0
                 memory_usage = stats.get("memory_stats", {}).get("usage", 0) / (1024 * 1024)
                 
-                if node_status[node_name]["status"] != "UP":
-                    print(f"[HEALTH CHECK] Node '{node_name}' has recovered and is now UP.")
-                
-                node_status[node_name].update({
-                    "status": "UP", "cpu": round(cpu_percent, 2), "memory": round(memory_usage, 2)
-                })
-        
-        except (docker.errors.NotFound, KeyError):
-            _mark_node_as_suspected(node_name)
+                with status_lock:
+                    node_status[node_name].update({ "cpu": round(cpu_percent, 2), "memory": round(memory_usage, 2) })
+            else:
+                mark_node_down(node_name, f"Status: {container.status}")
+
+        except docker.errors.NotFound:
+            mark_node_down(node_name, "Not Found")
         except Exception as e:
-            print(f"[ERROR] Unexpected error for {node_name}: {e}")
-            _mark_node_as_suspected(node_name)
+            mark_node_down(node_name, f"Error: {e}")
 
 @app.route('/get_fog_node', methods=['GET'])
 def get_fog_node():
     update_all_node_statuses()
-    active_nodes = {node: info for node, info in node_status.items() if info["status"] == "UP"}
-
+    with status_lock:
+        active_nodes = {node: info for node, info in node_status.items() if info["status"] == "UP"}
     if not active_nodes:
-        return jsonify({"error": "No active nodes"}), 503
-
+        return jsonify({"error": "No active fog nodes available"}), 503
     chosen_node = min(active_nodes, key=lambda node: active_nodes[node]['cpu'])
-    # --- Standardized log format for easy parsing ---
     print(f"STATUS_UPDATE::{node_status}")
     return jsonify({"fog_node_host": chosen_node})
-
-def _mark_node_as_suspected(node_name):
-    if node_name in node_status and node_status[node_name]['status'] == 'UP':
-        node_status[node_name]['status'] = 'SUSPECTED'
-        node_status[node_name]['last_failure'] = time.time()
-        print(f"[HEALTH CHECK] Node '{node_name}' is now SUSPECTED.")
 
 @app.route('/report_failure', methods=['POST'])
 def report_failure():
     failed_node = request.get_json().get('node')
-    if failed_node: _mark_node_as_suspected(failed_node)
+    if failed_node:
+        mark_node_down(failed_node, "Reported by IoT device")
     return jsonify({"status": "acknowledged"}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=False)
