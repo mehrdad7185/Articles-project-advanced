@@ -1,4 +1,4 @@
-# analysis/parser.py (Final, Synchronized Version)
+# analysis/parser.py (Corrected Version)
 # Comments are in English
 
 import re
@@ -28,9 +28,10 @@ def parse_log_file(log_file_path, scenario_name):
             time_step += 1
             current_timestamp = pd.to_datetime('2025-01-01') + pd.to_timedelta(time_step, unit='s')
 
-            # --- Extract Latency ---
-            if ">> Latency for" in message:
+            # --- KEY CHANGE: Corrected the string to look for ---
+            if ">> Calculated E2E Latency:" in message:
                 try:
+                    # The rest of the logic for parsing latency is correct
                     latency = float(message.split(':')[-1].strip().split(' ')[0])
                     records.append({
                         "scenario": scenario_name, "metric": "latency",
@@ -38,7 +39,7 @@ def parse_log_file(log_file_path, scenario_name):
                     })
                 except (ValueError, IndexError): continue
 
-            # --- Extract Health Events ---
+            # --- Extract Health Events (no changes here) ---
             if "[HEALTH CHECK]" in message:
                 event_match = re.search(r"Node '(\w+-\w+-\d)' (.*)", message)
                 if event_match:
@@ -49,7 +50,7 @@ def parse_log_file(log_file_path, scenario_name):
                         "node": node_name, "value": event_type, "timestamp": current_timestamp
                     })
 
-            # --- Extract CPU and Memory from the standardized log format ---
+            # --- Extract CPU and Memory (no changes here) ---
             if message.startswith("STATUS_UPDATE::"):
                 try:
                     dict_str = message.replace("STATUS_UPDATE::", "")
@@ -67,6 +68,7 @@ def parse_log_file(log_file_path, scenario_name):
                 except (ValueError, SyntaxError): continue
     return records
 
+# The main block remains unchanged
 if __name__ == '__main__':
     log_files = {
         '../log_resource_aware_normal.txt': 'Resource-Aware (Normal)',
