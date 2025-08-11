@@ -1,4 +1,4 @@
-# analysis/visualizer.py (Final Polished Version with new plots and annotations)
+# analysis/visualizer.py (Final & Polished Version)
 # Comments are in English
 
 import pandas as pd
@@ -28,8 +28,8 @@ def create_visualizations(csv_path):
 
     # --- Plot 1: Latency Distribution ---
     if not latency_data.empty:
-        fig, ax = plt.subplots(figsize=(10, 7))
-        sns.boxplot(x='scenario', y='value', data=latency_data, ax=ax)
+        plt.figure(figsize=(10, 7))
+        ax = sns.boxplot(x='scenario', y='value', data=latency_data)
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=10, integer=True))
         ax.set_title('Latency Distribution per Scenario', fontsize=16)
         ax.set_ylabel('Latency (ms)'); ax.set_xlabel('Scenario')
@@ -38,9 +38,11 @@ def create_visualizations(csv_path):
 
     # --- Plot 2: CPU Usage Time-Series with Rolling Average ---
     if not cpu_data.empty:
-        fig, ax = plt.subplots(figsize=(20, 8))
+        plt.figure(figsize=(20, 8))
+        # Create a copy to avoid SettingWithCopyWarning
+        cpu_data = cpu_data.copy()
         cpu_data['cpu_smooth'] = cpu_data.groupby('node')['value'].transform(lambda s: s.rolling(5, min_periods=1).mean())
-        sns.lineplot(x='timestamp', y='cpu_smooth', data=cpu_data, hue='node', style='node', ax=ax, linewidth=2.5)
+        ax = sns.lineplot(x='timestamp', y='cpu_smooth', data=cpu_data, hue='node', style='node', linewidth=2.5)
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=8))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
         ax.set_title('Smoothed CPU Usage During Failure & Recovery Scenario', fontsize=18)
@@ -51,22 +53,29 @@ def create_visualizations(csv_path):
 
     # --- Plot 3: Memory Usage with Clean Annotations ---
     if not mem_data.empty:
-        fig, ax = plt.subplots(figsize=(20, 8))
-        sns.lineplot(x='timestamp', y='value', data=mem_data, hue='node', style='node', markers=True, ax=ax, linewidth=2)
+        plt.figure(figsize=(20, 8))
+        ax = sns.lineplot(x='timestamp', y='value', data=mem_data, hue='node', style='node', markers=True, linewidth=2)
 
-        # Add extra space at the bottom for the text annotations
         y_min, y_max = ax.get_ylim()
         ax.set_ylim(bottom=y_min - (y_max-y_min)*0.3, top=y_max + (y_max-y_min)*0.1)
         
         if not event_data.empty:
             for _, event in event_data.iterrows():
-                color = 'red' if event['value'] == 'DOWN' else 'green'
-                # Use annotate for advanced text placement with arrows
-                ax.annotate(f"{event['node']} {event['value']}",
-                            xy=(event['timestamp'], ax.get_ylim()[0] + (y_max-y_min)*0.1), # Arrow points here
-                            xytext=(event['timestamp'], ax.get_ylim()[0]), # Text is here
+                # --- KEY FIX: Shorten names and stagger annotations vertically ---
+                node_short_name = event['node'].replace('fog-node-', 'FN-')
+                
+                if event['value'] == 'DOWN':
+                    y_offset = (y_max-y_min) * 0.01 # Place DOWN events at the bottom
+                    color = 'red'
+                else: # 'UP'
+                    y_offset = (y_max-y_min) * 0.08 # Place UP events slightly higher
+                    color = 'green'
+
+                ax.annotate(f"{node_short_name} {event['value']}",
+                            xy=(event['timestamp'], ax.get_ylim()[0] + (y_max-y_min)*0.15),
+                            xytext=(event['timestamp'], ax.get_ylim()[0] + y_offset),
                             arrowprops=dict(facecolor=color, shrink=0.05, width=1.5, headwidth=5),
-                            ha='center', va='bottom', fontsize=10, color=color,
+                            ha='center', va='bottom', fontsize=11, color=color,
                             bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.8))
         
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
