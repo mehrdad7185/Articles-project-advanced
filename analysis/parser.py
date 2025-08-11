@@ -1,5 +1,3 @@
-# analysis/parser.py (Corrected Version)
-# Comments are in English
 
 import re
 import pandas as pd

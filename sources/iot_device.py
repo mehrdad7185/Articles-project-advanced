@@ -1,5 +1,3 @@
-# sources/iot_device.py (Improved Logging Version)
-# Comments are in English
 
 import socket
 import time

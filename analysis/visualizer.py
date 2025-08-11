@@ -1,5 +1,3 @@
-# analysis/visualizer.py (Final & Polished Version)
-# Comments are in English
 
 import pandas as pd
 import matplotlib.pyplot as plt

@@ -1,5 +1,3 @@
-# sources/fog_node.py (Final Version with CPU-intensive task)
-# Comments are in English
 
 import socket
 import json

@@ -1,5 +1,3 @@
-# sources/scheduler.py (Final & Polished Version)
-# Comments are in English
 
 from flask import Flask, jsonify, request
 import time
