@@ -7,7 +7,7 @@ import ast
 def parse_log_file(log_file_path, scenario_name):
     """
     Parses a log file for all metrics. This version is synchronized
-    with the 'STATUS_UPDATE::' format from the final scheduler.py.
+    with the 'STATUS_UPDATE::' format from the scheduler.py.
     """
     log_line_regex = re.compile(r"^(.*?)\s*\|\s*(.*)")
     records = []
