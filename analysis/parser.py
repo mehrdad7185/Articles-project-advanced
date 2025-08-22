@@ -1,4 +1,5 @@
 
+
 import re
 import pandas as pd
 import os
@@ -7,7 +8,7 @@ import ast
 def parse_log_file(log_file_path, scenario_name):
     """
     Parses a log file for all metrics. This version is synchronized
-    with the 'STATUS_UPDATE::' format from the scheduler.py.
+    with all final log formats.
     """
     log_line_regex = re.compile(r"^(.*?)\s*\|\s*(.*)")
     records = []
@@ -26,10 +27,9 @@ def parse_log_file(log_file_path, scenario_name):
             time_step += 1
             current_timestamp = pd.to_datetime('2025-01-01') + pd.to_timedelta(time_step, unit='s')
 
-            # --- KEY CHANGE: Corrected the string to look for ---
-            if ">> Calculated E2E Latency:" in message:
+            # --- KEY FIX: Look for the correct "Response Time" string ---
+            if ">> Calculated E2E Response Time:" in message:
                 try:
-                    # The rest of the logic for parsing latency is correct
                     latency = float(message.split(':')[-1].strip().split(' ')[0])
                     records.append({
                         "scenario": scenario_name, "metric": "latency",
@@ -66,7 +66,6 @@ def parse_log_file(log_file_path, scenario_name):
                 except (ValueError, SyntaxError): continue
     return records
 
-# The main block remains unchanged
 if __name__ == '__main__':
     log_files = {
         '../log_resource_aware_normal.txt': 'Resource-Aware (Normal)',
