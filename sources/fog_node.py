@@ -3,23 +3,27 @@ import socket
 import json
 import os
 import time
+import math
+import random
 
 # --- Configuration ---
 HOST = '0.0.0.0'
 PORT = 9999
 NODE_ID = os.uname().nodename
 
-# --- NEW: CPU-Intensive function ---
-def cpu_intensive_task(n=30):
+# --- More Stable and Controllable CPU-Intensive function ---
+def cpu_intensive_task(duration_seconds=0.5):
     """
-    A simple function to simulate a CPU-heavy workload.
-    Calculating Fibonacci numbers recursively is a classic example.
-    The number 'n' can be adjusted to make the task lighter or heavier.
+    Simulates a stable CPU workload for a given duration.
+    This is better for generating smooth, realistic data for our ML model,
+    as opposed to the spiky load from a recursive Fibonacci function.
+    It performs a series of mathematical calculations in a loop.
     """
-    if n <= 1:
-        return n
-    else:
-        return cpu_intensive_task(n-1) + cpu_intensive_task(n-2)
+    start_time = time.time()
+    while time.time() - start_time < duration_seconds:
+        # Perform some math operations to keep the CPU busy
+        _ = math.sqrt(random.random()) * math.sin(random.random()) * math.cos(random.random())
+
 
 # Create a TCP/IP socket
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -32,28 +36,27 @@ print(f"[{NODE_ID}] Fog node is running and listening on {HOST}:{PORT}")
 while True:
     conn, addr = server_socket.accept()
     with conn:
-        end_time = time.time()
-        print(f"[{NODE_ID}] Connected by {addr}")
+        # We no longer capture the initial time here.
         data = conn.recv(1024)
         
         if data:
             try:
                 message = json.loads(data.decode('utf-8'))
-                print(f"[{NODE_ID}] Received data: {message}")
 
-                # --- NEW: Execute the heavy task upon receiving data ---
-                print(f"[{NODE_ID}] Starting CPU-intensive task...")
-                start_cpu_task = time.time()
-                # We don't care about the result, just the computation
-                cpu_intensive_task(n=32) 
-                end_cpu_task = time.time()
-                print(f"[{NODE_ID}] Finished CPU task in {end_cpu_task - start_cpu_task:.2f} seconds.")
+                # --- Step 1: Execute the stable workload task ---
+                # This simulates the actual processing of the request.
+                cpu_intensive_task(duration_seconds=0.7) 
+                
+                # --- KEY FIX: Capture the end time AFTER the processing is complete ---
+                end_time = time.time()
 
-                # Calculate and print the end-to-end latency
+                # --- Step 2: Calculate and print the true end-to-end response time ---
                 start_time = message.get("timestamp", 0)
                 if start_time > 0:
-                    latency = (end_time - start_time) * 1000
-                    print(f"[{NODE_ID}] >> Calculated E2E Latency: {latency:.2f} ms")
+                    # This value now correctly includes both network latency and service processing time.
+                    response_time = (end_time - start_time) * 1000
+                    # Changed the log message to be more accurate.
+                    print(f"[{NODE_ID}] >> Calculated E2E Response Time: {response_time:.2f} ms")
 
             except json.JSONDecodeError:
                 print(f"[{NODE_ID}] Received non-JSON data: {data.decode('utf-8')}")
